@@ -1,12 +1,14 @@
 package com.eneifour.fantry.payment.service;
 
 import com.eneifour.fantry.payment.domain.Payment;
+import com.eneifour.fantry.payment.domain.PaymentStatus;
 import com.eneifour.fantry.payment.domain.bootpay.BootpayReceiptDto;
 import com.eneifour.fantry.payment.dto.PaymentCancelRequest;
 import com.eneifour.fantry.payment.dto.PaymentCreateRequest;
 import com.eneifour.fantry.payment.exception.*;
 import com.eneifour.fantry.payment.mapper.PaymentMapper;
 import com.eneifour.fantry.payment.repository.PaymentRepository;
+import com.eneifour.fantry.payment.util.OrderUpdateHelper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,6 +41,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final BootpayWebhookService bootpayWebhookService;
     private final BootpayService bootpayService;
     private final ObjectMapper objectMapper;
+    private final OrderUpdateHelper orderUpdateHelper;
 
     /**
      * {@inheritDoc}
@@ -103,10 +106,11 @@ public class PaymentServiceImpl implements PaymentService {
      * {@inheritDoc}
      * <p>
      * 낙관적 락(@Version)을 사용하여 동시성을 제어합니다.
-     * ObjectOptimisticLockingFailureException 발생 시 유령 결제로 등록합니다.
+     * ObjectOptimisticLockingFailureException 발생 시 WebHook이 먼저 처리한 것으로 간주하고 정상 처리합니다.
+     * BootpayException 발생 시에는 유령 결제로 등록합니다.
      * </p>
      *
-     * @throws ConcurrentPaymentException 동시성 문제 발생 시
+     * @throws BootpayException Bootpay API 호출 실패 시
      */
     @Override
     @Transactional
@@ -118,9 +122,16 @@ public class PaymentServiceImpl implements PaymentService {
 
             BootpayReceiptDto receiptFromBootpay = bootpayService.getReceiptViaWebClient(receiptFromClient.getReceiptId());
             bootpayWebhookService.processPaymentVerification(payment, receiptFromBootpay);
-        } catch (ObjectOptimisticLockingFailureException | BootpayException e) {
+            if(payment.getStatus() == PaymentStatus.COMPLETE) {
+                orderUpdateHelper.purchase(payment, receiptFromBootpay);
+            }
+        } catch (ObjectOptimisticLockingFailureException e) {
+            log.info("중복 결제 요청 감지 (WebHook 우선 처리): orderId={}", receiptFromClient.getOrderId());
+        } catch (BootpayException e) {
+            // Bootpay API 에러는 여전히 GhostPayment로 처리
+            log.error("Bootpay API 호출 실패: orderId={}", receiptFromClient.getOrderId(), e);
             ghostPaymentService.createGhostPayment(receiptFromClient.getReceiptId());
-            throw new ConcurrentPaymentException(e);
+            throw e;
         }
     }
 
