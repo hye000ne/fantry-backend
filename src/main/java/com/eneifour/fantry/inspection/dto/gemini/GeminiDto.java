@@ -29,7 +29,7 @@ public class GeminiDto {
     public record Response(List<Candidate> candidates) {
         public String getText(){
             if(candidates == null || candidates.isEmpty()) return "분석 결과 없음";
-            return candidates.get(0).content.parts.get(0).text;
+            return candidates.getFirst().content.parts.getFirst().text;
 
         }
     }
