@@ -1,6 +1,7 @@
 package com.eneifour.fantry.inspection.service;
 
 import com.eneifour.fantry.inspection.dto.gemini.GeminiDto;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,6 +11,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Base64;
 
 @Service
@@ -21,6 +23,8 @@ public class AiInspectionService {
     private String apiKey;
     @Value("${gemini.api.url}")
     private String apiUrl;
+
+    private final ObjectMapper objectMapper;
 
     public String analyzeImage(MultipartFile file) {
         try {
@@ -34,10 +38,16 @@ public class AiInspectionService {
             // 3. 요청 DTO 생성
             GeminiDto.Request requestPayload = GeminiDto.Request.of(prompt, base64Image, mimeType);
 
+
+            String urlString = apiUrl + "?key=" + apiKey;
+
+            String jsonDebug = objectMapper.writeValueAsString(requestPayload);
+            log.info("Gemini 요청 JSON: {}", jsonDebug);
+
             // 4. WebClient로 API 호출
             GeminiDto.Response response = webClientBuilder.build()
                     .post()
-                    .uri(apiUrl + "?key=" + apiKey)
+                    .uri(URI.create(urlString))
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(requestPayload)
                     .retrieve()
